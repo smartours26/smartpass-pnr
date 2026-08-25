@@ -17,18 +17,12 @@
    ================================================================ -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-
 <script>
+
 // ================================================================
 // ============ CONFIGURACIÓN DE FIREBASE ============
 // ================================================================
 
-// 1. Importa los módulos que necesitas (sintaxis v9+)
-import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-import { getFirestore } from "firebase/firestore"; // <--- IMPORTANTE: Importar Firestore
-
-// 2. Define la configuración UNA sola vez
 const firebaseConfig = {
   apiKey: "AIzaSyARxB_FINrKDpJyZpxUlVnk3fDlTZa03cA",
   authDomain: "cotizador-smart.firebaseapp.com",
@@ -38,27 +32,21 @@ const firebaseConfig = {
   messagingSenderId: "127899783772",
   appId: "1:127899783772:web:5b480614bcbcf3ec4c8c99",
   measurementId: "G-JYKJNM69JP"
-};
+    };
 
-// 3. Inicializa Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-
-// 4. Inicializa Firestore correctamente
-const db = getFirestore(app); 
-
-// A partir de aquí ya puedes usar 'db' para tus funciones de Firestore.
-// Ejemplo: import { collection, getDocs } from "firebase/firestore";
-
-// Inicializar Firebase
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+    // Inicializar Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+</script>
+    
+console.log('🔥 Firebase inicializado correctamente');
+console.log('📁 Firestore:', db);
 
 // ================================================================
-// ============ FUNCIONES DE FIRESTORE ============
+// ============ FUNCIONES PARA USUARIOS ============
 // ================================================================
 
-// --- USUARIOS ---
+// Cargar usuarios desde Firestore
 async function cargarUsuariosFirestore() {
     try {
         const snapshot = await db.collection('usuarios').get();
@@ -66,14 +54,30 @@ async function cargarUsuariosFirestore() {
         snapshot.forEach(doc => {
             usuarios.push({ id: doc.id, ...doc.data() });
         });
+        console.log(`✅ ${usuarios.length} usuarios cargados desde Firestore`);
         return usuarios;
     } catch (error) {
-        console.error('Error cargando usuarios:', error);
+        console.error('❌ Error cargando usuarios:', error);
         const saved = localStorage.getItem('smartours_users');
         return saved ? JSON.parse(saved) : [];
     }
 }
 
+// Verificar usuario en Firestore
+async function verificarUsuario(username, password) {
+    try {
+        const usuarios = await cargarUsuariosFirestore();
+        const user = usuarios.find(u => 
+            u.username === username && u.password === password
+        );
+        return user || null;
+    } catch (error) {
+        console.error('❌ Error verificando usuario:', error);
+        return null;
+    }
+}
+
+// Guardar usuarios en Firestore
 async function guardarUsuariosFirestore(usuarios) {
     try {
         const batch = db.batch();
@@ -89,14 +93,35 @@ async function guardarUsuariosFirestore(usuarios) {
             });
         });
         await batch.commit();
+        console.log('✅ Usuarios guardados en Firestore');
         return true;
     } catch (error) {
-        console.error('Error guardando usuarios:', error);
+        console.error('❌ Error guardando usuarios:', error);
         return false;
     }
 }
 
-// --- COTIZACIONES ---
+// ================================================================
+// ============ FUNCIONES PARA COTIZACIONES ============
+// ================================================================
+
+// Guardar cotización en Firestore
+async function guardarCotizacionFirestore(item) {
+    try {
+        const ref = db.collection('cotizaciones').doc();
+        await ref.set({
+            ...item,
+            fecha: item.fecha || new Date().toISOString()
+        });
+        console.log('✅ Cotización guardada en Firestore');
+        return true;
+    } catch (error) {
+        console.error('❌ Error guardando cotización:', error);
+        return false;
+    }
+}
+
+// Cargar cotizaciones desde Firestore
 async function cargarCotizacionesFirestore() {
     try {
         const snapshot = await db.collection('cotizaciones')
@@ -107,28 +132,30 @@ async function cargarCotizacionesFirestore() {
         snapshot.forEach(doc => {
             cotizaciones.push({ id: doc.id, ...doc.data() });
         });
+        console.log(`✅ ${cotizaciones.length} cotizaciones cargadas desde Firestore`);
         return cotizaciones;
     } catch (error) {
-        console.error('Error cargando cotizaciones:', error);
+        console.error('❌ Error cargando cotizaciones:', error);
         const saved = localStorage.getItem('smartours_historial');
         return saved ? JSON.parse(saved) : [];
     }
 }
 
-async function guardarCotizacionFirestore(item) {
-    try {
-        const ref = db.collection('cotizaciones').doc();
-        await ref.set({
-            ...item,
-            fecha: item.fecha || new Date().toISOString()
+// Escuchar cambios en tiempo real
+function escucharCambiosCotizaciones(callback) {
+    return db.collection('cotizaciones')
+        .orderBy('fecha', 'desc')
+        .limit(1000)
+        .onSnapshot((snapshot) => {
+            if (snapshot.docChanges().length > 0) {
+                console.log('🔄 Cambios detectados en cotizaciones');
+                if (callback) callback();
+            }
+        }, (error) => {
+            console.error('❌ Error en escucha:', error);
         });
-        return true;
-    } catch (error) {
-        console.error('Error guardando cotización:', error);
-        return false;
-    }
 }
-
+    
 async function eliminarCotizacionFirestore(id) {
     try {
         await db.collection('cotizaciones').doc(id).delete();
@@ -219,16 +246,16 @@ async function login() {
     }
 
     try {
-        // Cargar usuarios desde Firestore
-        const usuariosFirestore = await cargarUsuariosFirestore();
-        const user = usuariosFirestore.find(u => u.username === username && u.password === password);
+        // Verificar en Firestore
+        const user = await verificarUsuario(username, password);
         
         if (user) {
             usuarioActual = user;
-            userDatabase = usuariosFirestore;
-            localStorage.setItem('smartours_users', JSON.stringify(userDatabase));
+            const users = await cargarUsuariosFirestore();
+            userDatabase = users;
+            localStorage.setItem('smartours_users', JSON.stringify(users));
         } else {
-            // Fallback a local
+            // Fallback a localStorage
             const userLocal = userDatabase.find(u => u.username === username && u.password === password);
             if (!userLocal) {
                 errorMsg.textContent = 'Usuario o contraseña incorrectos.';
@@ -239,7 +266,8 @@ async function login() {
             await guardarUsuariosFirestore(userDatabase);
         }
     } catch (error) {
-        // Si falla Firestore, usar local
+        console.error('Error en login:', error);
+        // Fallback a local
         const userLocal = userDatabase.find(u => u.username === username && u.password === password);
         if (!userLocal) {
             errorMsg.textContent = 'Usuario o contraseña incorrectos.';
@@ -248,6 +276,9 @@ async function login() {
         }
         usuarioActual = userLocal;
     }
+
+    // ... el resto de tu login (ya lo tienes) ...
+}
 
     // Resto del login (igual que antes)
     document.getElementById('userNameDisplay').textContent = usuarioActual.username;
@@ -5576,10 +5607,13 @@ document.addEventListener('DOMContentLoaded', function() {
     cargarCiudades();
     cargarCodigosPromocionales();
     cargarConfiguracion();
-    cargarHistorial();
+    // cargarHistorial();
     kiuInicializar();
     iniciarReloj();
-
+    escucharCambiosCotizaciones(() => {
+    cargarHistorial();
+    });
+    
     document.documentElement.removeAttribute('data-theme');
     document.getElementById('sidebarLogo').src = 'ST_Claro.png';
     document.getElementById('loginLogo').src = 'ST_Claro.png';
